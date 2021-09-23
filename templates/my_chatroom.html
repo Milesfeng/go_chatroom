@@ -1,0 +1,60 @@
+{{ define "my_chatroom" }}
+<html>
+<head>
+<meta http-equiv="content-type" content="text/html; charset=big5">
+</head>
+<body>
+<h1>{{ .username }}的聊天室列表</h1>
+<!-- <meta http-equiv="refresh" content="3" /> -->
+<table>
+    <thead>
+        <tr>
+            <th colspan="2">
+                <form name="add_room" method="post" action="/add_room",enctype="multipart/form-data">
+                    <input type="submit" name="add_room" value="新增聊天室">
+                </form>
+            </th>
+            <th colspan="1"> 
+                <form name="logout" method="post" action="/logout",enctype="multipart/form-data">
+                    <input type="submit" name="logout" value="登出">                
+                </form>
+            </th>
+
+        </tr>
+    </thead>
+    <tbody align ="center">
+        <tr>
+            <th>聊天室名稱</th>
+            <th>室長</th>
+            <th>操作</th>
+        </tr>
+              <tr>
+            <td>Room 1</td>
+            <td>{{ .email }}</td>
+            <td>進入</td>
+        </tr>
+    </tbody>
+</table>
+<p><input type="submit" name="prev" value="prev">
+<select>
+    <option>Page 1</option>
+    <option>Page 2</option>
+    <option>Page 3</option>
+    <option>Page 4</option>
+    <option>Page 5</option>
+    <option>Page 6</option>
+    <option>Page 7</option>
+</select>
+<input type="submit" name="next" value="next"></p>
+
+<!-- 點選上下頁自動刷新 -->
+<script>
+window.onpageshow = function(event) {
+  if (event.persisted) {
+    window.location.reload() 
+  }
+};
+</script>
+</body>
+</html>
+{{ end }}
