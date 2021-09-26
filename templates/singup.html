@@ -3,6 +3,7 @@
 <meta http-equiv="content-type" content="text/html; charset=big5">
 </head>
 <body>
+<center>
 <h1>會員註冊</h1>
 <form name="Singup" method="post" action="/Singup",enctype="multipart/form-data">
 <p>Email <input type="email" name="email" required>
@@ -11,7 +12,7 @@
 <p>Nickname <input type="text" name="username" required pattern="[a-zA-Z\d]{4,20}">
 <p></p><input type="submit" name="submit" value="註冊">
 </form>
-<input type ="button" onclick="javascript:location.href='http://localhost:5000/home'" value="回首頁"></input>
+<input type ="button" onclick="javascript:location.href='home'" value="回首頁"></input>
 
 <!-- 點選上下頁自動刷新 -->
 <script>
@@ -21,5 +22,6 @@
       }
     };
     </script>
+</center>
 </body>
 </html>

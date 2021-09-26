@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -30,6 +29,16 @@ type Member struct {
 	Email    string `json:"email"`
 }
 
+type ChatRoom struct {
+	RoomName  string `json:"room_name"`
+	RoomOwner string `json:"room_owner"`
+}
+
+type data struct {
+	username string
+	ChatRoom
+}
+
 // 建立資料表 member
 func CreateUserTable(db *sql.DB) {
 	sql := `create table member(
@@ -48,8 +57,8 @@ func CreateUserTable(db *sql.DB) {
 
 func CreateRoomTable(db *sql.DB) {
 	sql := `create table my_chatroom(
-		room_name int(20) auto_increment primary key not null,
-		room_owner char(20) not null
+		room_name  char(20)  not null,
+		room_owner char(20)  not null
 		); `
 
 	if _, err := db.Exec(sql); err != nil {
@@ -157,7 +166,7 @@ func CompareEmail(db *sql.DB, email string) bool {
 		fmt.Println("err : ", err)
 		return true
 	} else {
-		fmt.Println("E-mail已存在")
+		// fmt.Println("E-mail已存在")
 		return false
 	}
 }
@@ -193,8 +202,88 @@ func From_Email_GetUserName(db *sql.DB, email string) string {
 		// fmt.Printf("scan failed, err : %v\n", err)
 		fmt.Println("err : ", err)
 	}
-	fmt.Println("username : ", m.Username)
+	// fmt.Println("username : ", m.Username)
 	return m.Username
+}
+
+//	取得所有聊天室
+func GetMyChatroom(db *sql.DB, email string) []ChatRoom {
+	rows, err := db.Query("select * from my_chatroom")
+	if err != nil {
+		fmt.Printf("Query failed,err:%v\n", err)
+		return nil
+	}
+	r := ChatRoom{}
+	rooms := []ChatRoom{}
+	//一筆一筆讀取
+	for rows.Next() {
+		err = rows.Scan(&r.RoomName, &r.RoomOwner)
+		if err != nil {
+			fmt.Printf("Scan failed,err:%v\n", err)
+			return nil
+		}
+		rooms = append(rooms, r)
+		defer rows.Close()
+		if err != nil {
+			return nil
+		}
+	}
+	// fmt.Println(members)
+	return rooms
+}
+
+//	新增聊天室
+func CreateRoom(db *sql.DB, r ChatRoom) bool {
+
+	// c := ChatRoom{}
+	row := db.QueryRow("select room_name from my_chatroom where Binary room_name=? limit 1", r.RoomName)
+	if err := row.Scan(&r.RoomName); err != nil {
+		// fmt.Printf("scan failed, err : %v\n", err)
+		stmt, err := db.Prepare("INSERT my_chatroom SET room_name=?, room_owner=?")
+		checkErr(err)
+		res, err := stmt.Exec(r.RoomName, r.RoomOwner)
+		checkErr(err)
+		id, err := res.LastInsertId()
+		checkErr(err)
+
+		if err != nil {
+			fmt.Println("create ChatRoom failed:", err)
+			return false
+		} else {
+			fmt.Println("新增成功 : ", id)
+			return true
+		}
+	} else {
+		fmt.Println("聊天室名稱已被使用")
+		return false
+	}
+
+}
+
+//	取得所有聊天室 名稱與室長
+func GetALLChatroom(db *sql.DB) ([]ChatRoom, error) {
+	rows, err := db.Query("select * from my_chatroom ")
+	if err != nil {
+		fmt.Printf("Query failed,err : %v \n", err)
+		return nil, err
+	}
+	c := ChatRoom{}
+	all_chatroom := []ChatRoom{}
+	//一筆一筆讀取
+	for rows.Next() {
+		err = rows.Scan(&c.RoomName, &c.RoomOwner)
+		if err != nil {
+			fmt.Printf("Scan failed,err:%v\n", err)
+			return nil, err
+		}
+		all_chatroom = append(all_chatroom, c)
+		defer rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	// fmt.Println(members)
+	return all_chatroom, nil
 }
 
 type TemplateRenderer struct {
@@ -228,8 +317,13 @@ func main() {
 	// CompareLogin(db, m.Email, m.Password)
 	// CreateMember(db, mike)
 	// DeleteMember(db, "mike")
-
 	// UpdateMember(db, "Mike", "mike") // new,old
+
+	// c := ChatRoom{
+	// 	RoomName:  "jayroom",
+	// 	RoomOwner: "jay",
+	// }
+	// CreateRoom(db, c)
 
 	// member, err := GetMember(db)
 	// js, err := json.MarshalIndent(member, "", "")
@@ -248,10 +342,7 @@ func main() {
 	}
 
 	// ---------------------------------------------------------------------------------------------------
-
 	e := echo.New()
-	// sessionPath := "."         //	設置session資料存放位置
-	// sessionKey := "QSDFSfdsfs" // 設置cookies加密秘鑰
 	e.Use(session.Middleware(sessions.NewCookieStore(securecookie.GenerateRandomKey(32))))
 	// e.Use(session.Middleware(sessions.NewFilesystemStore("./", securecookie.GenerateRandomKey(32), securecookie.GenerateRandomKey(32))))
 
@@ -263,13 +354,14 @@ func main() {
 	e.Static("/home", "templates/home.html")
 	// e.Static("/my_chatroom", "templates/my_chatroom.html")
 	e.Static("/singup", "templates/singup.html")
+	e.Static("/create_chatroom", "templates/create_chatroom.html")
 
 	//	會員登入
 	e.POST("/login", func(c echo.Context) error {
 		email := strings.TrimSpace(c.FormValue("email"))
 		password := strings.TrimSpace(c.FormValue("password"))
 		if CompareLogin(db, email, password) == true {
-			sess, _ := session.Get("user_session", c)
+			sess, _ := session.Get("User", c)
 			sess.Options = &sessions.Options{
 				Path:   "/",       //	所有頁面都可以訪問session資料
 				MaxAge: 86400 * 7, //	Session有效期(秒)，
@@ -280,8 +372,8 @@ func main() {
 			sess.Values["username"] = From_Email_GetUserName(db, email)
 			sess.Save(c.Request(), c.Response()) //	保存使用者Session
 
-			fmt.Println("email :", email)
-			fmt.Println("password :", password)
+			// fmt.Println("email :", email)
+			// fmt.Println("password :", password)
 			// return c.HTML(http.StatusOK, fmt.Sprintf("<p><h2>Login success</h2> <br>email : %s <br> password : %s</p>", email, password))
 			// return c.Render(http.StatusOK, "my_chatroom.html", "")
 			return c.Redirect(http.StatusFound, "/my_chatroom")
@@ -292,7 +384,7 @@ func main() {
 	})
 	// 會員登出
 	e.POST("/logout", func(c echo.Context) error {
-		sess, _ := session.Get("user_session", c)
+		sess, _ := session.Get("User", c)
 		sess.Options = &sessions.Options{
 			Path:   "/", //	所有頁面都可以訪問session資料
 			MaxAge: -1,  //	Session有效期(秒)，
@@ -319,7 +411,7 @@ func main() {
 			Password: password,
 			Email:    email,
 		}
-		fmt.Println("")
+		fmt.Println("------------------------------------")
 		fmt.Println("email :", new_member.Email)
 		fmt.Println("password :", new_member.Password)
 		fmt.Println("id :", new_member.Id)
@@ -336,23 +428,96 @@ func main() {
 
 	})
 
+	// 聊天室列表
 	e.GET("/my_chatroom", func(c echo.Context) error {
-		sess, err := session.Get("user_session", c)
+		sess, err := session.Get("User", c)
+
+		all_chatroom, _ := GetALLChatroom(db)
+		// fmt.Println("GetALLChatroom ", all_chatroom)
+		// fmt.Printf("GetALLChatroom_TYPE : %T \n ", all_chatroom)
+
+		// var chatroom []Chatroom
+		// var username string
+		// for k, v := range sess.Values {
+		// 	if k == "username" {
+		// 		// fmt.Println("k : ", k)
+		// 		username = v.(string)
+		// 		fmt.Println("room_owner : ", username)
+		// 	}
+
+		// }
+		// new_data := data{
+		// 	username: username,
+		// 	x,
+		// }
+		// fmt.Println(new_data)
 		if err != nil {
 			return err
 		}
 		if sess.Values["isLogin"] == true {
 			fmt.Println("存取成功 : ", sess.Values["username"])
-			return c.Render(http.StatusOK, "my_chatroom", sess.Values)
+			return c.Render(http.StatusOK, "my_chatroom", all_chatroom)
 		} else {
 			fmt.Println("存取失敗，請先登入")
 			return c.Redirect(http.StatusFound, "/home")
 
 		}
 	})
+
+	//	首頁
 	e.GET("/", func(c echo.Context) error {
 		return c.Redirect(http.StatusFound, "/home")
 	})
+
+	// 新增聊天室
+	e.POST("/create_chatroom", func(c echo.Context) error {
+		sess, err := session.Get("User", c)
+		if err != nil {
+			return err
+		}
+		// all_chatroom, _ := GetALLChatroom(db)
+
+		if sess.Values["isLogin"] == true {
+			// fmt.Println("存取成功 : ", sess.Values["username"])
+			room_name := strings.TrimSpace(c.FormValue("room_name"))
+			var room_owner string
+			for k, v := range sess.Values {
+				if k == "username" {
+					fmt.Println("k : ", k)
+					room_owner = v.(string)
+					fmt.Println("room_owner : ", room_owner)
+				}
+
+			}
+			// fmt.Println("room_owner : ", room_owner)
+			// room_owner = sess.Values["room_owner"]
+			new_room := ChatRoom{
+				RoomName:  room_name,
+				RoomOwner: room_owner,
+			}
+			if CreateRoom(db, new_room) == true {
+				// fmt.Println("")
+				// fmt.Println("room_name :", new_room.RoomName)
+				// fmt.Println("room_owner :", room_owner)
+				// fmt.Printf("room_owner %T", room_owner)
+				// return c.Render(http.StatusOK, "my_chatroom", all_chatroom)
+				return c.Redirect(http.StatusFound, "/my_chatroom")
+
+			} else {
+				// fmt.Println("新增失敗")
+				return c.HTML(http.StatusOK, fmt.Sprintf("<p><h2>新增失敗，聊天室名稱已被使用，請回上一頁重新新增</h2></p>"))
+			}
+
+		} else {
+			fmt.Println("存取失敗，請先登入")
+			return c.Redirect(http.StatusFound, "/home")
+		}
+		// return nil
+	})
+
+	// e.POST("/create_chatroom", func(c echo.Context) error {
+	// 	return c.Redirect(http.StatusFound, "/create_chatroom")
+	// })
 
 	// //	新增會員
 	// e.GET("/users/add", func(c echo.Context) error {
@@ -373,19 +538,19 @@ func main() {
 	// })
 
 	// // 顯示所有會員
-	e.GET("/users/show", func(c echo.Context) error {
-		member, err := GetMember(db)
-		js, err := json.MarshalIndent(member, "", "")
-		if err != nil {
-			panic(err)
-		}
-		fmt.Println(string(js))
-		return c.String(http.StatusOK, string(js))
-	})
+	// e.GET("/users/show", func(c echo.Context) error {
+	// 	member, err := GetMember(db)
+	// 	js, err := json.MarshalIndent(member, "", "")
+	// 	if err != nil {
+	// 		panic(err)
+	// 	}
+	// 	fmt.Println(string(js))
+	// 	return c.String(http.StatusOK, string(js))
+	// })
 
 	// e.Any("/users/", func(c echo.Context) error {
 	// 	return c.String(http.StatusOK, c.QueryParam("pass"))
 	// })
-	e.Logger.Fatal(e.Start(":5000"))
+	e.Logger.Fatal(e.Start("192.168.0.102:5000"))
 
 }

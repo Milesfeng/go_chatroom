@@ -3,16 +3,25 @@
 <head>
 <meta http-equiv="content-type" content="text/html; charset=big5">
 </head>
-<body>
-<h1>{{ .username }}的聊天室列表</h1>
+<body >
+    <script>
+        window.onpageshow = function(event) {
+          if (event.persisted) {
+            window.location.reload() 
+          }
+        };
+        </script>
+<center>
+<h1>xxx的聊天室列表</h1>
 <!-- <meta http-equiv="refresh" content="3" /> -->
 <table>
     <thead>
         <tr>
             <th colspan="2">
-                <form name="add_room" method="post" action="/add_room",enctype="multipart/form-data">
-                    <input type="submit" name="add_room" value="新增聊天室">
-                </form>
+                <!-- <form name="create_chatroom" method="get" action="/create_chatroom",enctype="multipart/form-data"> -->
+                    <!-- <input type="submit" name="create_chatroom" value="新增聊天室"> -->
+                    <input type ="button" onclick="javascript:location.href='create_chatroom'" value="新增聊天室"></input>
+                <!-- </form> -->
             </th>
             <th colspan="1"> 
                 <form name="logout" method="post" action="/logout",enctype="multipart/form-data">
@@ -27,14 +36,24 @@
             <th>聊天室名稱</th>
             <th>室長</th>
             <th>操作</th>
-        </tr>
+        <!-- </tr>
               <tr>
-            <td>Room 1</td>
-            <td>{{ .email }}</td>
-            <td>進入</td>
-        </tr>
+            <td>name</td>
+            <td>owber</td>
+
+            <td> <a href="create_chatroom">進入</a></td>
+        </tr> -->
+        {{range $key, $value := .}}
+        <tr>
+            <td>{{$value.RoomName}}</td>
+            <td>{{$value.RoomOwner}}</td>
+            <td> <a href="create_chatroom">進入</a></td>
+         </tr>
+         {{end}}
     </tbody>
 </table>
+
+
 <p><input type="submit" name="prev" value="prev">
 <select>
     <option>Page 1</option>
@@ -48,13 +67,7 @@
 <input type="submit" name="next" value="next"></p>
 
 <!-- 點選上下頁自動刷新 -->
-<script>
-window.onpageshow = function(event) {
-  if (event.persisted) {
-    window.location.reload() 
-  }
-};
-</script>
+</center>
 </body>
 </html>
 {{ end }}
