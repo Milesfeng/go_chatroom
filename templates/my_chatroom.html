@@ -10,9 +10,13 @@
             window.location.reload() 
           }
         };
+
+//         function print_value() {
+//     	document.getElementById("result").innerHTML = document.getElementById("page").options[document.getElementById("page").selectedIndex ].value
+// }
         </script>
 <center>
-<h1>xxx的聊天室列表</h1>
+<h1>{{.Username}}的聊天室列表</h1>
 <!-- <meta http-equiv="refresh" content="3" /> -->
 <table>
     <thead>
@@ -43,7 +47,7 @@
 
             <td> <a href="create_chatroom">進入</a></td>
         </tr> -->
-        {{range $key, $value := .}}
+        {{range $key, $value := .ChatRooms}}
         <tr>
             <td>{{$value.RoomName}}</td>
             <td>{{$value.RoomOwner}}</td>
@@ -52,21 +56,32 @@
          {{end}}
     </tbody>
 </table>
+<br>
+<form name = "prev_page" action="/prev_page" method="get" style="margin:0px;display:inline;">
+<input type="submit"  value="prev">
+</form>
 
-
-<p><input type="submit" name="prev" value="prev">
-<select>
-    <option>Page 1</option>
-    <option>Page 2</option>
-    <option>Page 3</option>
-    <option>Page 4</option>
-    <option>Page 5</option>
-    <option>Page 6</option>
-    <option>Page 7</option>
+<form name = "selected_page"  action="/selected_page" method="post" style="margin:0px;display:inline;">
+<select id = "page" name ="page" onchange="this.form.submit();">
+    <!-- <select onchange="location.href=this.options[this.selectedIndex].value"> -->
+    {{$cp :=.CurrentPage}}
+    {{ range $i, $page :=  (.Pages) }}
+        {{if eq $page $cp}}
+            <option selected >{{ $page }}</option>
+        
+        {{else}}
+        <option  >{{ $page }}</option>
+        {{end}}
+  
+    {{end}}
 </select>
-<input type="submit" name="next" value="next"></p>
+<!-- <input type="submit" name="page" value="page"> -->
+</form>
 
-<!-- 點選上下頁自動刷新 -->
+<form name = "next_page" action="/next_page" method="get" style="margin:0px;display:inline;">
+    <input type="submit"  value="next">
+</form>
+
 </center>
 </body>
 </html>

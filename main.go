@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -34,9 +35,11 @@ type ChatRoom struct {
 	RoomOwner string `json:"room_owner"`
 }
 
-type data struct {
-	username string
-	ChatRoom
+type render_data struct {
+	Username    string
+	ChatRooms   []ChatRoom
+	Pages       []int
+	CurrentPage int
 }
 
 // 建立資料表 member
@@ -286,6 +289,32 @@ func GetALLChatroom(db *sql.DB) ([]ChatRoom, error) {
 	return all_chatroom, nil
 }
 
+// 顯示下拉式選單的頁面 0~10 10~20 20~30 30~40
+func GetSelectPage(db *sql.DB, page int) ([]ChatRoom, error) {
+	rows, err := db.Query("select * from my_chatroom limit ?,10", (page*10)-10)
+	if err != nil {
+		fmt.Printf("Query failed,err : %v \n", err)
+		return nil, err
+	}
+	c := ChatRoom{}
+	all_chatroom := []ChatRoom{}
+	//一筆一筆讀取
+	for rows.Next() {
+		err = rows.Scan(&c.RoomName, &c.RoomOwner)
+		if err != nil {
+			fmt.Printf("Scan failed,err:%v\n", err)
+			return nil, err
+		}
+		all_chatroom = append(all_chatroom, c)
+		defer rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	// fmt.Println(members)
+	return all_chatroom, nil
+}
+
 type TemplateRenderer struct {
 	templates *template.Template
 }
@@ -305,6 +334,7 @@ func main() {
 	//	連線DB
 	db, err := sql.Open("mysql", "root:123456@tcp(127.0.0.1:3306)/chatroom?charset=utf8")
 	checkErr(err)
+
 	// CreateRoomTable(db)
 	// CreateTable(db)
 	// m := Member{
@@ -370,6 +400,7 @@ func main() {
 			sess.Values["email"] = email
 			sess.Values["isLogin"] = true
 			sess.Values["username"] = From_Email_GetUserName(db, email)
+			sess.Values["current_page"] = 1
 			sess.Save(c.Request(), c.Response()) //	保存使用者Session
 
 			// fmt.Println("email :", email)
@@ -431,32 +462,59 @@ func main() {
 	// 聊天室列表
 	e.GET("/my_chatroom", func(c echo.Context) error {
 		sess, err := session.Get("User", c)
-
 		all_chatroom, _ := GetALLChatroom(db)
-		// fmt.Println("GetALLChatroom ", all_chatroom)
-		// fmt.Printf("GetALLChatroom_TYPE : %T \n ", all_chatroom)
+		p := strings.TrimSpace(c.FormValue("page"))
+		// fmt.Println("p : ", p)
+		var selected_page int
+		selected_page, _ = strconv.Atoi(p)
+		// fmt.Println("p : ", selected_page)
+		selected_page_chatroom := []ChatRoom{}
+		if selected_page == 0 {
+			selected_page = 1
+		}
+		selected_page_chatroom, _ = GetSelectPage(db, selected_page)
 
-		// var chatroom []Chatroom
-		// var username string
-		// for k, v := range sess.Values {
-		// 	if k == "username" {
-		// 		// fmt.Println("k : ", k)
-		// 		username = v.(string)
-		// 		fmt.Println("room_owner : ", username)
-		// 	}
+		var username string
+		for k, v := range sess.Values {
+			if k == "username" {
+				// fmt.Println("k : ", k)
+				username = v.(string)
+				// fmt.Println("room_owner : ", username)
+			}
 
-		// }
-		// new_data := data{
-		// 	username: username,
-		// 	x,
-		// }
-		// fmt.Println(new_data)
+		}
+
+		var page = 1
+		new_datas := len(all_chatroom)
+		var pages []int
+		if new_datas/10 > 0 {
+			page += new_datas / 10
+			if new_datas%10 == 0 {
+				page--
+			}
+		}
+
+		for i := 1; i <= page; i++ {
+			pages = append(pages, i)
+		}
+		// fmt.Println("pages :", pages)
+
+		new_data := render_data{
+			Username:    username,
+			ChatRooms:   selected_page_chatroom,
+			Pages:       pages,
+			CurrentPage: selected_page,
+		}
+		fmt.Println("CurrentPage :", sess.Values["current_page"])
+		// fmt.Println("len of new_data.ChatRooms : ", new_data.ChatRooms)
+		// fmt.Println("pages : ", pages)
+
 		if err != nil {
 			return err
 		}
 		if sess.Values["isLogin"] == true {
-			fmt.Println("存取成功 : ", sess.Values["username"])
-			return c.Render(http.StatusOK, "my_chatroom", all_chatroom)
+			// fmt.Println("存取成功 : ", sess.Values["username"])
+			return c.Render(http.StatusOK, "my_chatroom", new_data)
 		} else {
 			fmt.Println("存取失敗，請先登入")
 			return c.Redirect(http.StatusFound, "/home")
@@ -496,11 +554,6 @@ func main() {
 				RoomOwner: room_owner,
 			}
 			if CreateRoom(db, new_room) == true {
-				// fmt.Println("")
-				// fmt.Println("room_name :", new_room.RoomName)
-				// fmt.Println("room_owner :", room_owner)
-				// fmt.Printf("room_owner %T", room_owner)
-				// return c.Render(http.StatusOK, "my_chatroom", all_chatroom)
 				return c.Redirect(http.StatusFound, "/my_chatroom")
 
 			} else {
@@ -513,6 +566,211 @@ func main() {
 			return c.Redirect(http.StatusFound, "/home")
 		}
 		// return nil
+	})
+
+	//點選下拉式選單更換頁面
+	e.POST("/selected_page", func(c echo.Context) error {
+		p := strings.TrimSpace(c.FormValue("page")) // p = 下拉式選單所選擇的頁數
+		// fmt.Println("p : ", p)
+		selected_page, _ := strconv.Atoi(p)
+		all_chatroom, _ := GetALLChatroom(db)
+		selected_page_chatroom, _ := GetSelectPage(db, selected_page)
+
+		// fmt.Println("all_chatroom : ", all_chatroom)
+
+		sess, err := session.Get("User", c)
+		if err != nil {
+			return err
+		}
+
+		sess.Values["current_page"] = selected_page
+		sess.Save(c.Request(), c.Response()) //	保存使用者Session
+		fmt.Println("current_page : ", sess.Values["current_page"])
+		var username string
+		for k, v := range sess.Values {
+			if k == "username" {
+				// fmt.Println("k : ", k)
+				username = v.(string)
+				// fmt.Println("room_owner : ", username)
+			}
+
+		}
+
+		var page = 1
+		new_datas := len(all_chatroom)
+		var pages []int
+		if new_datas/10 > 0 {
+			page += new_datas / 10
+			if new_datas%10 == 0 {
+				page--
+			}
+
+		}
+
+		for i := 1; i <= page; i++ {
+			pages = append(pages, i)
+		}
+		// fmt.Println("pages :", pages)
+		new_data := render_data{
+			Username:    username,
+			ChatRooms:   selected_page_chatroom,
+			Pages:       pages,
+			CurrentPage: selected_page,
+		}
+		if sess.Values["isLogin"] == true {
+			// fmt.Println("存取成功 : ", sess.Values["username"])
+			return c.Render(http.StatusOK, "my_chatroom", new_data)
+		} else {
+			fmt.Println("存取失敗，請先登入")
+			return c.Redirect(http.StatusFound, "/home")
+
+		}
+	})
+
+	// 點選prev按鈕，回到上一頁聊天室列表
+	e.GET("/prev_page", func(c echo.Context) error {
+		sess, err := session.Get("User", c)
+		var current_page int
+		var prev_page int
+		for k, v := range sess.Values {
+			if k == "current_page" {
+				// fmt.Println("cp ,v : ", k, v)
+				current_page = v.(int)
+			}
+
+		}
+		if current_page > 1 {
+			prev_page = current_page - 1
+		} else {
+			prev_page = current_page
+		}
+		// fmt.Println("prev_page : ", prev_page)
+
+		// current_page, _ := strconv.Atoi(cp)
+		// fmt.Println("current_page : ", current_page)
+		// prev_page := current_page - 1
+		// fmt.Println("prev_page : ", prev_page)
+		sess.Values["current_page"] = prev_page
+		sess.Save(c.Request(), c.Response()) //	保存使用者Session
+		all_chatroom, _ := GetALLChatroom(db)
+		selected_page_chatroom, _ := GetSelectPage(db, prev_page)
+
+		// // fmt.Println("all_chatroom : ", all_chatroom)
+
+		if err != nil {
+			return err
+		}
+		// // var chatroom []Chatroom
+		var username string
+		for k, v := range sess.Values {
+			if k == "username" {
+				username = v.(string)
+			}
+		}
+
+		var page = 1
+		new_datas := len(all_chatroom)
+		var pages []int
+		if new_datas/10 > 0 {
+			page += new_datas / 10
+			if new_datas%10 == 0 {
+				page--
+			}
+
+		}
+
+		for i := 1; i <= page; i++ {
+			pages = append(pages, i)
+		}
+		// fmt.Println("pages :", pages)
+		new_data := render_data{
+			Username:    username,
+			ChatRooms:   selected_page_chatroom,
+			Pages:       pages,
+			CurrentPage: prev_page,
+		}
+		if sess.Values["isLogin"] == true {
+			// fmt.Println("存取成功 : ", sess.Values["username"])
+			return c.Render(http.StatusOK, "my_chatroom", new_data)
+		} else {
+			fmt.Println("存取失敗，請先登入")
+			return c.Redirect(http.StatusFound, "/home")
+
+		}
+	})
+
+	// 點選next按鈕，進入下一頁聊天室列表
+	e.GET("/next_page", func(c echo.Context) error {
+		sess, err := session.Get("User", c)
+		if err != nil {
+			return err
+		}
+
+		all_chatroom, _ := GetALLChatroom(db)
+		var username string
+		for k, v := range sess.Values {
+			if k == "username" {
+				username = v.(string)
+			}
+		}
+
+		var page = 1
+		new_datas := len(all_chatroom)
+		var pages []int
+		if new_datas/10 > 0 {
+			page += new_datas / 10
+			if new_datas%10 == 0 {
+				page--
+			}
+
+		}
+
+		for i := 1; i <= page; i++ {
+			pages = append(pages, i)
+		}
+		var current_page int
+		var next_page int
+		for k, v := range sess.Values {
+			if k == "current_page" {
+				// fmt.Println("cp ,v : ", k, v)
+				current_page = v.(int)
+			}
+
+		}
+		if current_page < page {
+			next_page = current_page + 1
+		} else {
+			next_page = current_page
+		}
+		// fmt.Println("next_page : ", next_page)
+
+		// current_page, _ := strconv.Atoi(cp)
+		// fmt.Println("current_page : ", current_page)
+		// prev_page := current_page - 1
+		// fmt.Println("prev_page : ", prev_page)
+		sess.Values["current_page"] = next_page
+		sess.Save(c.Request(), c.Response()) //	保存使用者Session
+		selected_page_chatroom, _ := GetSelectPage(db, next_page)
+
+		// // fmt.Println("all_chatroom : ", all_chatroom)
+
+		// // var chatroom []Chatroom
+
+		// fmt.Println("pages :", pages)
+		new_data := render_data{
+			Username:    username,
+			ChatRooms:   selected_page_chatroom,
+			Pages:       pages,
+			CurrentPage: next_page,
+		}
+		if sess.Values["isLogin"] == true {
+			// fmt.Println("存取成功 : ", sess.Values["username"])
+			return c.Render(http.StatusOK, "my_chatroom", new_data)
+		} else {
+			fmt.Println("存取失敗，請先登入")
+			return c.Redirect(http.StatusFound, "/home")
+
+		}
 	})
 
 	// e.POST("/create_chatroom", func(c echo.Context) error {
