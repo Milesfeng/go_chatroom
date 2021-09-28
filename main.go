@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -9,12 +11,15 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/securecookie"
 	"github.com/gorilla/sessions"
+	"github.com/gorilla/websocket"
 	"github.com/labstack/echo-contrib/session"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 )
 
 func checkErr(err error) {
@@ -330,6 +335,193 @@ func (t *TemplateRenderer) Render(w io.Writer, name string, data interface{}, c 
 	return t.templates.ExecuteTemplate(w, name, data)
 }
 
+//----------------------------------------------------------------------
+//    *****  Server *****
+
+// var addr = flag.String("addr", ":5000", "http service address")
+
+//----------------------------------------------------------------------
+//    *****  CLient *****
+const (
+	// Time allowed to write a message to the peer.
+	writeWait = 10 * time.Second
+
+	// Time allowed to read the next pong message from the peer.
+	pongWait = 60 * time.Second
+
+	// Send pings to peer with this period. Must be less than pongWait.
+	pingPeriod = (pongWait * 9) / 10
+
+	// Maximum message size allowed from peer.
+	maxMessageSize = 512
+)
+
+var (
+	newline = []byte{'\n'}
+	space   = []byte{' '}
+)
+
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+}
+
+// Client is a middleman between the websocket connection and the hub.
+type Client struct {
+	hub *Hub
+
+	// The websocket connection.
+	conn *websocket.Conn
+
+	// Buffered channel of outbound messages.
+	send chan []byte
+}
+
+// readPump pumps messages from the websocket connection to the hub.
+//
+// The application runs readPump in a per-connection goroutine. The application
+// ensures that there is at most one reader on a connection by executing all
+// reads from this goroutine.
+func (c *Client) readPump() {
+	defer func() {
+		c.hub.unregister <- c
+		c.conn.Close()
+	}()
+	c.conn.SetReadLimit(maxMessageSize)
+	c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+	for {
+		_, message, err := c.conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("error: %v", err)
+			}
+			break
+		}
+		message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
+		c.hub.broadcast <- message
+	}
+}
+
+// writePump pumps messages from the hub to the websocket connection.
+//
+// A goroutine running writePump is started for each connection. The
+// application ensures that there is at most one writer to a connection by
+// executing all writes from this goroutine.
+func (c *Client) writePump() {
+	ticker := time.NewTicker(pingPeriod)
+	defer func() {
+		ticker.Stop()
+		c.conn.Close()
+	}()
+	for {
+		select {
+		case message, ok := <-c.send:
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if !ok {
+				// The hub closed the channel.
+				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+
+			w, err := c.conn.NextWriter(websocket.TextMessage)
+			if err != nil {
+				return
+			}
+			w.Write(message)
+
+			// Add queued chat messages to the current websocket message.
+			n := len(c.send)
+			for i := 0; i < n; i++ {
+				w.Write(newline)
+				w.Write(<-c.send)
+			}
+
+			if err := w.Close(); err != nil {
+				return
+			}
+		case <-ticker.C:
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
+}
+
+// func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
+// 	var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+// 	conn, err := upgrader.Upgrade(w, r, nil)
+// 	if err != nil {
+// 		log.Println(err)
+// 		return
+// 	}
+
+// serveWs handles websocket requests from the peer.
+func serveWs(hub *Hub, c echo.Context) {
+	conn, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256)}
+	client.hub.register <- client
+
+	// Allow collection of memory referenced by the caller by doing all work in
+	// new goroutines.
+	go client.writePump()
+	go client.readPump()
+}
+
+//-----------------------------------------------------------------------
+//    *****  HUB *****
+type Hub struct {
+	// Registered clients.
+	clients map[*Client]bool
+
+	// Inbound messages from the clients.
+	broadcast chan []byte
+
+	// Register requests from the clients.
+	register chan *Client
+
+	// Unregister requests from clients.
+	unregister chan *Client
+}
+
+func newHub() *Hub {
+	return &Hub{
+		broadcast:  make(chan []byte),
+		register:   make(chan *Client),
+		unregister: make(chan *Client),
+		clients:    make(map[*Client]bool),
+	}
+}
+func (h *Hub) run() {
+	for {
+		select {
+		case client := <-h.register:
+			h.clients[client] = true
+		case client := <-h.unregister:
+			if _, ok := h.clients[client]; ok {
+				delete(h.clients, client)
+				close(client.send)
+			}
+		case message := <-h.broadcast:
+			for client := range h.clients {
+				select {
+				case client.send <- message:
+				default:
+					close(client.send)
+					delete(h.clients, client)
+				}
+			}
+		}
+	}
+}
+
+//-----------------------------------------------------------------------
+
 func main() {
 	//	連線DB
 	db, err := sql.Open("mysql", "root:123456@tcp(127.0.0.1:3306)/chatroom?charset=utf8")
@@ -373,6 +565,8 @@ func main() {
 
 	// ---------------------------------------------------------------------------------------------------
 	e := echo.New()
+	// e.Use(middleware.Logger())
+	e.Use(middleware.Recover())
 	e.Use(session.Middleware(sessions.NewCookieStore(securecookie.GenerateRandomKey(32))))
 	// e.Use(session.Middleware(sessions.NewFilesystemStore("./", securecookie.GenerateRandomKey(32), securecookie.GenerateRandomKey(32))))
 
@@ -382,7 +576,7 @@ func main() {
 	e.Renderer = renderer
 	//	首頁
 	e.Static("/home", "templates/home.html")
-	// e.Static("/my_chatroom", "templates/my_chatroom.html")
+	e.Static("/chatroom", "templates/chatroom.html")
 	e.Static("/singup", "templates/singup.html")
 	e.Static("/create_chatroom", "templates/create_chatroom.html")
 
@@ -505,7 +699,7 @@ func main() {
 			Pages:       pages,
 			CurrentPage: selected_page,
 		}
-		fmt.Println("CurrentPage :", sess.Values["current_page"])
+		// fmt.Println("CurrentPage :", sess.Values["current_page"])
 		// fmt.Println("len of new_data.ChatRooms : ", new_data.ChatRooms)
 		// fmt.Println("pages : ", pages)
 
@@ -585,7 +779,7 @@ func main() {
 
 		sess.Values["current_page"] = selected_page
 		sess.Save(c.Request(), c.Response()) //	保存使用者Session
-		fmt.Println("current_page : ", sess.Values["current_page"])
+		// fmt.Println("current_page : ", sess.Values["current_page"])
 		var username string
 		for k, v := range sess.Values {
 			if k == "username" {
@@ -773,21 +967,6 @@ func main() {
 		}
 	})
 
-	// e.POST("/create_chatroom", func(c echo.Context) error {
-	// 	return c.Redirect(http.StatusFound, "/create_chatroom")
-	// })
-
-	// //	新增會員
-	// e.GET("/users/add", func(c echo.Context) error {
-	// 	id := c.QueryParam("username")
-	// 	var m Member
-	// 	m.Id = 0
-	// 	m.Username = id
-	// 	m.Password = id + "123"
-	// 	m.Email = id + "@gmail.com"
-	// 	CreateMember(db, m)
-	// 	return c.String(http.StatusOK, "新增成功 id : "+id)
-	// })
 	// // 刪除會員
 	// e.GET("/users/del/:id", func(c echo.Context) error {
 	// 	id := c.Param("id")
@@ -806,9 +985,118 @@ func main() {
 	// 	return c.String(http.StatusOK, string(js))
 	// })
 
-	// e.Any("/users/", func(c echo.Context) error {
-	// 	return c.String(http.StatusOK, c.QueryParam("pass"))
+	//----------------------------------------------------------------
+	flag.Parse()
+	hub := newHub()
+	go hub.run()
+
+	// e.GET("/chatroom2", func(c echo.Context) error {
+	// 	fmt.Println("OK")
+	// 	sess, err := session.Get("User", c)
+	// 	if err != nil {
+	// 		panic(err)
+	// 	}
+	// 	type ChatRoom struct {
+	// 		RoomName  string `json:"room_name"`
+	// 		RoomOwner string `json:"room_owner"`
+	// 	}
+
+	// 	send_data := ChatRoom{
+	// 		RoomName:  "Room1",
+	// 		RoomOwner: "Miles",
+	// 	}
+
+	// 	if sess.Values["isLogin"] == true {
+	// 		serveWs(hub, c)
+	// 		return c.Render(http.StatusOK, "chatroom", send_data)
+	// 	} else {
+	// 		fmt.Println("存取失敗，請先登入")
+	// 		return c.Redirect(http.StatusFound, "/home")
+	// 	}
+
 	// })
-	e.Logger.Fatal(e.Start("192.168.0.102:5000"))
+
+	e.GET("/chatroom", func(c echo.Context) error {
+		println("connection successs")
+		sess, err := session.Get("User", c)
+		if err != nil {
+			panic(err)
+		}
+
+		var username string
+		for k, v := range sess.Values {
+			if k == "username" {
+				username = v.(string)
+			}
+		}
+
+		type ChatRoom struct {
+			RoomName  string `json:"room_name"`
+			RoomOwner string `json:"room_owner"`
+			LoginUser string `json:"loom_owner"`
+		}
+
+		send_data := ChatRoom{
+			RoomName:  "Room1",
+			RoomOwner: "Miles",
+			LoginUser: username,
+		}
+
+		if sess.Values["isLogin"] == true {
+			// serveWs(hub, c)
+			return c.Render(http.StatusFound, "chatroom", send_data)
+		} else {
+			fmt.Println("存取失敗，請先登入")
+			return c.Redirect(http.StatusFound, "/home")
+		}
+
+	})
+
+	e.GET("/chatroom/ws", func(c echo.Context) error {
+		println("ws connection")
+
+		// sess, err := session.Get("User", c)
+		// if err != nil {
+		// 	panic(err)
+		// }
+		// type ChatRoom struct {
+		// 	RoomName  string `json:"room_name"`
+		// 	RoomOwner string `json:"room_owner"`
+		// }
+
+		// send_data := ChatRoom{
+		// 	RoomName:  "Room1",
+		// 	RoomOwner: "Miles",
+		// }
+
+		// if sess.Values["isLogin"] == true {
+		// 	serveWs(hub, c)
+		// 	return c.Render(http.StatusOK, "chatroom", send_data)
+		// } else {
+		// 	fmt.Println("存取失敗，請先登入")
+		// 	return c.Redirect(http.StatusFound, "/home")
+		// }
+
+		// return c.File("templates/chatroom.html")
+
+		serveWs(hub, c)
+		return nil
+	})
+
+	// http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+	// 	fmt.Println("ResponseWriter ", w)
+	// 	fmt.Println("Request ", r)
+	// 	serveWs(hub, w, r)
+	// })
+
+	// http.HandleFunc("/chatroom", func(w http.ResponseWriter, r *http.Request) {
+	// 	serveWs(hub, w, r)
+	// })
+	// err = http.ListenAndServe(*addr, nil)
+	// if err != nil {
+	// 	log.Fatal("ListenAndServe: ", err)
+	// }
+
+	e.Logger.Fatal(e.Start(":5000"))
 
 }
