@@ -41,18 +41,19 @@
             <th>聊天室名稱</th>
             <th>室長</th>
             <th>操作</th>
-        <!-- </tr>
-              <tr>
-            <td>name</td>
-            <td>owber</td>
-
-            <td> <a href="create_chatroom">進入</a></td>
-        </tr> -->
         {{range $key, $value := .ChatRooms}}
         <tr>
             <td>{{$value.RoomName}}</td>
             <td>{{$value.RoomOwner}}</td>
-            <td> <a href="/chatroom" target="_blank"> 進入 </a></td>
+            <td>
+                <form id="_form" method="post" action="/chatroom" style="margin:0px;display:inline;">
+                    <input type="hidden" name="selected_room_name" value="{{$value.RoomName}}" >
+                    <input type="hidden" name="selected_room_owner" value="{{$value.RoomOwner}}" >
+                    <!-- <a href="/chatroom" target="_blank" onclick="this.parentNode.submit()"> 進入</a> -->
+                    <a onclick="this.parentNode.submit()"> 進入</a>
+
+                </form>
+            </td>
          </tr>
          {{end}}
     </tbody>
@@ -67,9 +68,8 @@
     <!-- <select onchange="location.href=this.options[this.selectedIndex].value"> -->
     {{$cp :=.CurrentPage}}
     {{ range $i, $page :=  (.Pages) }}
-        {{if eq $page $cp}}
+        {{if eq $page $cp}} <!--if page == cp-->
             <option selected >{{ $page }}</option>
-        
         {{else}}
         <option  >{{ $page }}</option>
         {{end}}
@@ -83,10 +83,6 @@
     <input type="submit"  value="next">
 </form>
 <br>
-<form name = "chatroom" action="/chatroom" method="get" style="margin:0px;display:inline;">
-    <input type="submit"  value="chatroom">
-</form>
-
 </center>
 </body>
 </html>

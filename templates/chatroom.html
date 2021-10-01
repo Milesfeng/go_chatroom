@@ -9,6 +9,7 @@
       var conn;
       var msg = document.getElementById("msg");
       var log = document.getElementById("log");
+      // var ALL_RoomUsers = document.getElementById("ALL_RoomUsers");
       var username = "{{.LoginUser}} : "
       function appendLog(item) {
         var doScroll = log.scrollTop > log.scrollHeight - log.clientHeight - 1;
@@ -25,6 +26,7 @@
         if (!msg.value) {
           return false;
         }
+        msg.value = username + msg.value;
         conn.send(msg.value);
         msg.value = "";
         return false;
@@ -34,17 +36,38 @@
         conn = new WebSocket("ws://" + document.location.host + "/chatroom/ws");
         // conn = new WebSocket("ws://localhost:5000/chatroom/ws");
         conn.onclose = function (evt) {
+
           var item = document.createElement("div");
           item.innerHTML = "<b>Connection closed.</b>";
           appendLog(item);
         };
         conn.onmessage = function (evt) {
+//----------------------------------------------------------------
+// console.log("evt : " , evt);
+
+// console.log("js_data_TYPE : " , typeof JSON.parse(evt.data));
+// console.log("js_data_Value : " , JSON.parse(evt.data));
+
+        try {
+          if (typeof JSON.parse(evt.data) != "string"){
+          var js_data = JSON.parse(evt.data);
+          console.log("js_data : " , js_data);
+          var user_list = document.getElementById('user_list');
+          user_list.innerHTML  = "在線人員 : " + JSON.stringify(js_data)
+
+          }
+        } catch (e) {
+          console.log("not json");
           var messages = evt.data.split('\n');
           for (var i = 0; i < messages.length; i++) {
             var item = document.createElement("div");
-            item.innerText =  username + messages[i];
+            item.innerText = messages[i];
             appendLog(item);
+
           }
+        }
+//----------------------------------------------------------------
+
         };
       } else {
         var item = document.createElement("div");
@@ -94,6 +117,8 @@
   <div style="text-align:center;">室長 : {{.RoomOwner}}</div>
   <div style="text-align:center;">聊天室名稱 : {{.RoomName}}</div>
   <div style="text-align:center;">User : {{.LoginUser}}</div>
+  <div id = "user_list"style="text-align:center;"></div>
+
 
   <div id="log"></div>
   <form id="form">

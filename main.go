@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"database/sql"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -375,6 +376,19 @@ type Client struct {
 
 	// Buffered channel of outbound messages.
 	send chan []byte
+
+	data *Data
+}
+
+type Data struct {
+	User     string   `json:"user"`
+	UserList []string `json:"user_list"`
+	RoomName string   `json:"room_name"`
+}
+
+type send_msg struct {
+	Msg      string `json:"msg"`
+	RoomName string `json:"room_name"`
 }
 
 // readPump pumps messages from the websocket connection to the hub.
@@ -383,14 +397,45 @@ type Client struct {
 // ensures that there is at most one reader on a connection by executing all
 // reads from this goroutine.
 func (c *Client) readPump() {
+	// 用戶離開後註銷用戶
 	defer func() {
+		// c.hub.broadcast <- []byte("******* " + c.user + " 離開聊天室 *******") //
+		// fmt.Println("所有用戶: ", user_list)
+		// fmt.Println("離開用戶  :", c.data.User)
+		// if len(user_list) == 1 && user_list[0] == c.data.User {
+		// 	user_list = []string{}
+		// } else if user_list[len(user_list)-1] == c.data.User {
+		// 	user_list = user_list[:len(user_list)-1]
+		// } else if user_list[0] == c.data.User {
+		// 	user_list = user_list[1:]
+		// } else {
+		// 	// fmt.Println("ALL user: ", user_list)
+		// 	for i := 0; i < len(user_list); i++ {
+		// 		// fmt.Printf("user_list[%d] = %s \n", i, user_list[i])
+		// 		if user_list[i] == c.data.User {
+		// 			user_list = append(user_list[:i], user_list[i+1:]...)
+		// 		}
+		// 	}
+		// }
+		// fmt.Println("在線人員: ", user_list)
+		// fmt.Println("*--------------------------------------------- ")
+		// js_data, _ := json.Marshal(c.data)
+		// fmt.Println("js_data : ", string(js_data))
+
+		// c.hub.broadcast <- js_data
 		c.hub.unregister <- c
 		c.conn.Close()
 	}()
+
 	c.conn.SetReadLimit(maxMessageSize)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
 	for {
+		// fmt.Println("登入人員 :", user_list)
+		// c.data.UserList = user_list
+		// js_data, _ := json.Marshal(c.data)
+		// c.hub.broadcast <- js_data
+
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
@@ -399,7 +444,17 @@ func (c *Client) readPump() {
 			break
 		}
 		message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
-		c.hub.broadcast <- message
+		// fmt.Println("message : ", string(message))
+		new_msg := send_msg{
+			Msg:      string(message),
+			RoomName: c.data.RoomName,
+		}
+		js_msg, _ := json.Marshal(new_msg)
+
+		c.hub.broadcast <- js_msg
+
+		// c.hub.broadcast <- message
+
 	}
 }
 
@@ -436,7 +491,6 @@ func (c *Client) writePump() {
 				w.Write(newline)
 				w.Write(<-c.send)
 			}
-
 			if err := w.Close(); err != nil {
 				return
 			}
@@ -464,9 +518,32 @@ func serveWs(hub *Hub, c echo.Context) {
 		log.Println(err)
 		return
 	}
-	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256)}
-	client.hub.register <- client
+	sess, _ := session.Get("User", c)
+	var username string
+	var roomname string
 
+	for k, v := range sess.Values {
+		if k == "username" {
+			username = v.(string)
+		}
+		if k == "RoomName" {
+			roomname = v.(string)
+		}
+	}
+
+	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256), data: &Data{RoomName: roomname, User: username}}
+	client.hub.register <- client
+	// client.userlist = append(client.userlist,[]byte(username))
+
+	// All_RoomUser := append(client.userlist, username)
+	// var All_RoomUser string
+	// fmt.Println("client.userlist", All_RoomUser)
+	// for i, v := range client.user {
+	// 	fmt.Println("i", i)
+	// 	fmt.Println("v", v)
+
+	// }
+	// client.hub.broadcast <- []byte("聊天室成員有 :" + All_RoomUser)
 	// Allow collection of memory referenced by the caller by doing all work in
 	// new goroutines.
 	go client.writePump()
@@ -497,24 +574,139 @@ func newHub() *Hub {
 		clients:    make(map[*Client]bool),
 	}
 }
+
 func (h *Hub) run() {
 	for {
 		select {
 		case client := <-h.register:
 			h.clients[client] = true
+			// user_list = append(user_list, client.data.User)
+			// client.data.UserList = user_list
+			// js_data, _ := json.Marshal(client.data)
+			// fmt.Println(client.data)
+			// client.send <- js_data
+			var user_list = []string{}
+			type user_list_json struct {
+				User_list []byte `json:"user_list"`
+				Roomname  string `json:"roomname"`
+			}
+			// js := user_list_json{}
+			js_data, _ := json.Marshal(user_list)
+
+			for c := range h.clients {
+				fmt.Println("現在房間 :", client.data.RoomName)
+				fmt.Println("所有的房間 :", c.data.RoomName)
+				if client.data.RoomName == c.data.RoomName {
+					user_list = append(user_list, c.data.User)
+					js_data, _ = json.Marshal(user_list)
+					fmt.Printf("進入js_data : %T  \n", js_data)
+					fmt.Println("進入js_data value :", string(js_data))
+
+					// js = user_list_json{User_list: js_data, Roomname: client.data.RoomName}
+				} else {
+					js_data, _ = json.Marshal(client.data.User)
+					// js = user_list_json{User_list: js_data, Roomname: client.data.RoomName}
+					fmt.Printf("進入js_data : %T  \n", js_data)
+					fmt.Println("進入js_data value :", string(js_data))
+
+					c.send <- js_data
+				}
+				// c.send <- js_data
+			}
+
+			for c := range h.clients {
+				if client.data.RoomName == c.data.RoomName {
+					c.send <- js_data
+				}
+			}
+
+			fmt.Println("-----------------------------------------")
+
+			// client.send <- js_data
+			// fmt.Println("js_data : ", string(js_data))
+
+		// 判斷用戶列表中是否存在此用戶 ， 是 -> 註銷
 		case client := <-h.unregister:
+			// fmt.Println("del Client  :", client.data.User)
+			// if len(user_list) == 1 && user_list[0] == client.data.User {
+			// 	user_list = []string{}
+			// } else if user_list[len(user_list)-1] == client.data.User {
+			// 	user_list = user_list[:len(user_list)-1]
+			// } else if user_list[0] == client.data.User {
+			// 	user_list = user_list[1:]
+			// } else {
+			// 	for i := range user_list {
+			// 		if user_list[i] == client.data.User {
+			// 			user_list = append(user_list[:i], user_list[i+1:]...)
+			// 		}
+			// 	}
+			// }
+			// fmt.Println("user_list : ", user_list)
+
+			// js_data, _ := json.Marshal(client.data)
+			// client.send <- js_data
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
 				close(client.send)
 			}
-		case message := <-h.broadcast:
-			for client := range h.clients {
-				select {
-				case client.send <- message:
-				default:
-					close(client.send)
-					delete(h.clients, client)
+
+			var user_list = []string{}
+			type user_list_json struct {
+				User_list []byte `json:"user_list"`
+				Roomname  string `json:"roomname"`
+				AAA       []string
+			}
+
+			// js := user_list_json{}
+			js_data, _ := json.Marshal(user_list)
+
+			for c := range h.clients {
+				fmt.Println("現在房間 :", client.data.RoomName)
+				fmt.Println("所有的房間 :", c.data.RoomName)
+				if client.data.RoomName == c.data.RoomName {
+					user_list = append(user_list, c.data.User)
+					js_data, _ = json.Marshal(user_list)
+					fmt.Printf("離開 js_data : %T  \n", js_data)
+					fmt.Println("離開 js_data value :", string(js_data))
+
+					// js = user_list_json{User_list: js_data, Roomname: client.data.RoomName}
+				} else {
+					js_data, _ = json.Marshal(client.data.User)
+					// js = user_list_json{User_list: js_data, Roomname: client.data.RoomName}
+					fmt.Printf("進入js_data : %T  \n", js_data)
+					fmt.Println("進入js_data value :", string(js_data))
+
+					c.send <- js_data
 				}
+				// c.send <- js_data
+			}
+
+			for c := range h.clients {
+				if client.data.RoomName == c.data.RoomName {
+					c.send <- js_data
+				}
+			}
+		// 取得message 並發發送給所有 Client
+		case message := <-h.broadcast:
+			// fmt.Println("broadcast  message :", string(message))
+			var send_msg_json send_msg
+			json.Unmarshal(message, &send_msg_json)
+			// var user_list_json Data
+			// json.Unmarshal(message, &user_list_json)
+			// fmt.Println("js_message :", user_list_json.RoomName)
+
+			for client := range h.clients {
+				if send_msg_json.RoomName == client.data.RoomName {
+					select {
+					// 發送訊息
+					case client.send <- []byte(send_msg_json.Msg):
+					// 發送訊息失敗則刪除connection資訊
+					default:
+						close(client.send)
+						delete(h.clients, client)
+					}
+				}
+
 			}
 		}
 	}
@@ -547,21 +739,28 @@ func main() {
 	// }
 	// CreateRoom(db, c)
 
-	// member, err := GetMember(db)
-	// js, err := json.MarshalIndent(member, "", "")
-	// fmt.Println("json := ", string(js))
-	// fmt.Println("----------所有會員----------\n")
-	// for _, m := range member {
-	// 	fmt.Println(m)
-	// }
-	// fmt.Println("---------------------------\n")
-	// fmt.Println(reflect.TypeOf(member))
+	// var user_list = []string{}
 
-	defer db.Close()
-	err = db.Ping()
-	if err != nil {
-		log.Print(err)
-	}
+	// user_list = append(user_list, "123")
+	// fmt.Println("user_list : ", user_list)
+	// fmt.Printf("user_list_TYPE %T: \n", user_list)
+
+	// fmt.Println("----------------------------------------------------------------")
+	// js, _ := json.Marshal(user_list)
+	// fmt.Println("js : ", string(js))
+	// fmt.Printf("js_TYPE %T: \n", js)
+
+	// fmt.Println("----------------------------------------------------------------")
+	// jss, _ := json.Marshal("123")
+	// fmt.Println("jss : ", string(jss))
+	// fmt.Printf("jss_TYPE %T: \n", jss)
+
+	// defer db.Close()
+	// err = db.Ping()
+	// if err != nil {
+	// 	log.Print(err)
+
+	// }
 
 	// ---------------------------------------------------------------------------------------------------
 	e := echo.New()
@@ -596,7 +795,6 @@ func main() {
 			sess.Values["username"] = From_Email_GetUserName(db, email)
 			sess.Values["current_page"] = 1
 			sess.Save(c.Request(), c.Response()) //	保存使用者Session
-
 			// fmt.Println("email :", email)
 			// fmt.Println("password :", password)
 			// return c.HTML(http.StatusOK, fmt.Sprintf("<p><h2>Login success</h2> <br>email : %s <br> password : %s</p>", email, password))
@@ -963,7 +1161,6 @@ func main() {
 		} else {
 			fmt.Println("存取失敗，請先登入")
 			return c.Redirect(http.StatusFound, "/home")
-
 		}
 	})
 
@@ -989,32 +1186,6 @@ func main() {
 	flag.Parse()
 	hub := newHub()
 	go hub.run()
-
-	// e.GET("/chatroom2", func(c echo.Context) error {
-	// 	fmt.Println("OK")
-	// 	sess, err := session.Get("User", c)
-	// 	if err != nil {
-	// 		panic(err)
-	// 	}
-	// 	type ChatRoom struct {
-	// 		RoomName  string `json:"room_name"`
-	// 		RoomOwner string `json:"room_owner"`
-	// 	}
-
-	// 	send_data := ChatRoom{
-	// 		RoomName:  "Room1",
-	// 		RoomOwner: "Miles",
-	// 	}
-
-	// 	if sess.Values["isLogin"] == true {
-	// 		serveWs(hub, c)
-	// 		return c.Render(http.StatusOK, "chatroom", send_data)
-	// 	} else {
-	// 		fmt.Println("存取失敗，請先登入")
-	// 		return c.Redirect(http.StatusFound, "/home")
-	// 	}
-
-	// })
 
 	e.GET("/chatroom", func(c echo.Context) error {
 		println("connection successs")
@@ -1052,50 +1223,53 @@ func main() {
 
 	})
 
+	// 透過Websocket連線
 	e.GET("/chatroom/ws", func(c echo.Context) error {
 		println("ws connection")
-
-		// sess, err := session.Get("User", c)
-		// if err != nil {
-		// 	panic(err)
-		// }
-		// type ChatRoom struct {
-		// 	RoomName  string `json:"room_name"`
-		// 	RoomOwner string `json:"room_owner"`
-		// }
-
-		// send_data := ChatRoom{
-		// 	RoomName:  "Room1",
-		// 	RoomOwner: "Miles",
-		// }
-
-		// if sess.Values["isLogin"] == true {
-		// 	serveWs(hub, c)
-		// 	return c.Render(http.StatusOK, "chatroom", send_data)
-		// } else {
-		// 	fmt.Println("存取失敗，請先登入")
-		// 	return c.Redirect(http.StatusFound, "/home")
-		// }
-
-		// return c.File("templates/chatroom.html")
-
 		serveWs(hub, c)
 		return nil
 	})
 
-	// http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-	// 	fmt.Println("ResponseWriter ", w)
-	// 	fmt.Println("Request ", r)
-	// 	serveWs(hub, w, r)
-	// })
+	// 點選聊天室，傳送被點選房間之名稱
+	e.POST("/chatroom", func(c echo.Context) error {
+		// println("POST　ＯＫ")
+		sess, err := session.Get("User", c)
+		if err != nil {
+			panic(err)
+		}
+		selected_room_name := strings.TrimSpace(c.FormValue("selected_room_name"))   // p = 下拉式選單所選擇的頁數
+		selected_room_owner := strings.TrimSpace(c.FormValue("selected_room_owner")) // p = 下拉式選單所選擇的頁數
 
-	// http.HandleFunc("/chatroom", func(w http.ResponseWriter, r *http.Request) {
-	// 	serveWs(hub, w, r)
-	// })
-	// err = http.ListenAndServe(*addr, nil)
-	// if err != nil {
-	// 	log.Fatal("ListenAndServe: ", err)
-	// }
+		var username string
+		for k, v := range sess.Values {
+			if k == "username" {
+				username = v.(string)
+			}
+		}
+
+		type ChatRoom struct {
+			RoomName  string `json:"room_name"`
+			RoomOwner string `json:"room_owner"`
+			LoginUser string `json:"loom_owner"`
+		}
+
+		send_data := ChatRoom{
+			RoomName:  selected_room_name,
+			RoomOwner: selected_room_owner,
+			LoginUser: username,
+		}
+
+		sess.Values["RoomName"] = selected_room_name
+		sess.Save(c.Request(), c.Response()) //	保存使用者Session
+
+		if sess.Values["isLogin"] == true {
+			// serveWs(hub, c)
+			return c.Render(http.StatusFound, "chatroom", send_data)
+		} else {
+			fmt.Println("存取失敗，請先登入")
+			return c.Redirect(http.StatusFound, "/home")
+		}
+	})
 
 	e.Logger.Fatal(e.Start(":5000"))
 
