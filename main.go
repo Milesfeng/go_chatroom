@@ -698,7 +698,7 @@ func (h *Hub) run() {
 
 func main() {
 	//	連線DB
-	db, err := sql.Open("mysql", "root:123456@tcp(127.0.0.1:3306)/chatroom?charset=utf8")
+	db, err := sql.Open("mysql", "root:123456@tcp(projects/warm-abacus-328001/global/networks/default:3306)/chatroom?charset=utf8")
 	checkErr(err)
 
 	// CreateRoomTable(db)
