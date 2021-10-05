@@ -33,7 +33,7 @@
       };
 
       if (window["WebSocket"]) {
-        conn = new WebSocket("ws://" + document.location.host + "/chatroom/ws");
+        conn = new WebSocket("wss://" + document.location.host + "/chatroom/ws");
         // conn = new WebSocket("ws://localhost:5000/chatroom/ws");
         conn.onclose = function (evt) {
 
