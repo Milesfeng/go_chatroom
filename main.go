@@ -81,7 +81,7 @@ func CreateRoomTable(db *sql.DB) {
 func CreateMember(db *sql.DB, m Member) bool {
 	if CompareUserid(db, m.Username) == true && CompareEmail(db, m.Email) == true {
 
-		stmt, err := db.Prepare("INSERT member SET id=?, username=?, email=?, password=?")
+		stmt, err := db.Prepare("INSERT `member` SET id=?, username=?, email=?, password=?")
 		checkErr(err)
 
 		res, err := stmt.Exec(m.Id, m.Username, m.Email, m.Password)
@@ -104,7 +104,7 @@ func CreateMember(db *sql.DB, m Member) bool {
 
 // 刪除會員
 func DeleteMember(db *sql.DB, name string) {
-	stmt, err := db.Prepare("delete from member where Binary username=?")
+	stmt, err := db.Prepare("delete from `member` where Binary username=?")
 	checkErr(err)
 
 	res, err := stmt.Exec(name)
@@ -117,7 +117,7 @@ func DeleteMember(db *sql.DB, name string) {
 }
 
 func UpdateMember(db *sql.DB, new string, old string) {
-	stmt, err := db.Prepare("update member set Binary username=? where Binary username=?")
+	stmt, err := db.Prepare("update `member` set Binary username=? where Binary username=?")
 	checkErr(err)
 
 	res, err := stmt.Exec(new, old)
@@ -131,7 +131,7 @@ func UpdateMember(db *sql.DB, new string, old string) {
 
 //	取得所有會員資訊
 func GetMember(db *sql.DB) ([]Member, error) {
-	rows, err := db.Query("select * from member ")
+	rows, err := db.Query("select * from `member` ")
 	if err != nil {
 		fmt.Printf("Query failed,err:%v\n", err)
 		return nil, err
@@ -157,7 +157,7 @@ func GetMember(db *sql.DB) ([]Member, error) {
 
 func CompareUserid(db *sql.DB, username string) bool {
 	m := Member{}
-	row := db.QueryRow("select username from member where Binary username=? limit 1", username)
+	row := db.QueryRow("select username from `member` where Binary username=? limit 1", username)
 	if err := row.Scan(&m.Username); err != nil {
 		// fmt.Printf("scan failed, err : %v\n", err)
 		fmt.Println("err : ", err)
@@ -169,7 +169,7 @@ func CompareUserid(db *sql.DB, username string) bool {
 }
 func CompareEmail(db *sql.DB, email string) bool {
 	m := Member{}
-	row := db.QueryRow("select email from member where Binary email=? limit 1", email)
+	row := db.QueryRow("select email from `member` where Binary email=? limit 1", email)
 	if err := row.Scan(&m.Email); err != nil {
 		// fmt.Printf("scan failed, err : %v\n", err)
 		fmt.Println("err : ", err)
@@ -184,7 +184,7 @@ func CompareLogin(db *sql.DB, email, password string) bool {
 	m := Member{}
 	if CompareEmail(db, email) == false {
 
-		row := db.QueryRow("select password from member where Binary email=? limit 1", email)
+		row := db.QueryRow("select password from `member` where Binary email=? limit 1", email)
 		if err := row.Scan(&m.Password); err != nil {
 			// fmt.Printf("scan failed, err : %v\n", err)
 			fmt.Println("err   : ", err)
@@ -206,7 +206,7 @@ func CompareLogin(db *sql.DB, email, password string) bool {
 
 func From_Email_GetUserName(db *sql.DB, email string) string {
 	m := Member{}
-	row := db.QueryRow("select username from member where Binary email=?", email)
+	row := db.QueryRow("select username from `member` where Binary email=?", email)
 	if err := row.Scan(&m.Username); err != nil {
 		// fmt.Printf("scan failed, err : %v\n", err)
 		fmt.Println("err : ", err)
@@ -604,7 +604,7 @@ func (h *Hub) run() {
 
 					// js = user_list_json{User_list: js_data, Roomname: client.data.RoomName}
 				} else {
-					js_data, _ = json.Marshal(client.data.User)
+					js_data, _ = json.Marshal(string(client.data.User))
 					// js = user_list_json{User_list: js_data, Roomname: client.data.RoomName}
 					fmt.Printf("進入js_data : %T  \n", js_data)
 					fmt.Println("進入js_data value :", string(js_data))
@@ -627,24 +627,6 @@ func (h *Hub) run() {
 
 		// 判斷用戶列表中是否存在此用戶 ， 是 -> 註銷
 		case client := <-h.unregister:
-			// fmt.Println("del Client  :", client.data.User)
-			// if len(user_list) == 1 && user_list[0] == client.data.User {
-			// 	user_list = []string{}
-			// } else if user_list[len(user_list)-1] == client.data.User {
-			// 	user_list = user_list[:len(user_list)-1]
-			// } else if user_list[0] == client.data.User {
-			// 	user_list = user_list[1:]
-			// } else {
-			// 	for i := range user_list {
-			// 		if user_list[i] == client.data.User {
-			// 			user_list = append(user_list[:i], user_list[i+1:]...)
-			// 		}
-			// 	}
-			// }
-			// fmt.Println("user_list : ", user_list)
-
-			// js_data, _ := json.Marshal(client.data)
-			// client.send <- js_data
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
 				close(client.send)
@@ -716,7 +698,7 @@ func (h *Hub) run() {
 
 func main() {
 	//	連線DB
-	db, err := sql.Open("mysql", "root:123456@tcp(mydb)/chatroom?charset=utf8")
+	db, err := sql.Open("mysql", "root:123456@tcp(34.80.7.6)/chatroom?charset=utf8")
 	checkErr(err)
 
 	// CreateRoomTable(db)
@@ -755,12 +737,12 @@ func main() {
 	// fmt.Println("jss : ", string(jss))
 	// fmt.Printf("jss_TYPE %T: \n", jss)
 
-	// defer db.Close()
-	// err = db.Ping()
-	// if err != nil {
-	// 	log.Print(err)
+	defer db.Close()
+	err = db.Ping()
+	if err != nil {
+		log.Print(err)
 
-	// }
+	}
 
 	// ---------------------------------------------------------------------------------------------------
 	e := echo.New()
