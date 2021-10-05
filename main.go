@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"text/template"
@@ -18,6 +19,7 @@ import (
 	"github.com/gorilla/securecookie"
 	"github.com/gorilla/sessions"
 	"github.com/gorilla/websocket"
+	_ "github.com/joho/godotenv/autoload"
 	"github.com/labstack/echo-contrib/session"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -698,7 +700,22 @@ func (h *Hub) run() {
 
 func main() {
 	//	連線DB
-	db, err := sql.Open("mysql", "root:123456@tcp(127.0.0.1:1433)/chatroom?charset=utf8")
+	var (
+		dbUser                 = os.Getenv("DB_USER")                  // e.g. 'my-db-user'
+		dbPwd                  = os.Getenv("DB_PASS")                  // e.g. 'my-db-password'
+		instanceConnectionName = os.Getenv("INSTANCE_CONNECTION_NAME") // e.g. 'project:region:instance'
+		dbName                 = os.Getenv("DB_NAME")                  // e.g. 'my-database'
+	)
+
+	socketDir, isSet := os.LookupEnv("DB_SOCKET_DIR")
+	if !isSet {
+		socketDir = "/cloudsql"
+	}
+
+	dbURI := fmt.Sprintf("%s:%s@unix(/%s/%s)/%s?parseTime=true", dbUser, dbPwd, socketDir, instanceConnectionName, dbName)
+
+	db, err := sql.Open("mysql", dbURI)
+	// db, err := sql.Open("mysql", "root:123456@tcp(127.0.0.1:1433)/chatroom?charset=utf8")
 	checkErr(err)
 
 	// CreateRoomTable(db)
