@@ -699,7 +699,7 @@ func (h *Hub) run() {
 //-----------------------------------------------------------------------
 
 func main() {
-	//	連線DB
+	//	連線 Cloud SQL
 	var (
 		dbUser                 = os.Getenv("DB_USER")                  // e.g. 'my-db-user'
 		dbPwd                  = os.Getenv("DB_PASS")                  // e.g. 'my-db-password'
@@ -715,7 +715,8 @@ func main() {
 	dbURI := fmt.Sprintf("%s:%s@unix(/%s/%s)/%s?parseTime=true", dbUser, dbPwd, socketDir, instanceConnectionName, dbName)
 
 	db, err := sql.Open("mysql", dbURI)
-	// db, err := sql.Open("mysql", "root:123456@tcp(127.0.0.1:1433)/chatroom?charset=utf8")
+
+	// db, err := sql.Open("mysql", "root:123456@tcp(127.0.0.1:3306)/chatroom?charset=utf8")	//	連線 docker mysql
 	checkErr(err)
 
 	// CreateRoomTable(db)
@@ -1170,16 +1171,16 @@ func main() {
 	// 	return c.String(http.StatusOK, "刪除成功 : "+id)
 	// })
 
-	// // 顯示所有會員
-	// e.GET("/users/show", func(c echo.Context) error {
-	// 	member, err := GetMember(db)
-	// 	js, err := json.MarshalIndent(member, "", "")
-	// 	if err != nil {
-	// 		panic(err)
-	// 	}
-	// 	fmt.Println(string(js))
-	// 	return c.String(http.StatusOK, string(js))
-	// })
+	// 顯示所有會員
+	e.GET("/users/show", func(c echo.Context) error {
+		member, err := GetMember(db)
+		js, err := json.MarshalIndent(member, "", "")
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(string(js))
+		return c.String(http.StatusOK, string(js))
+	})
 
 	//----------------------------------------------------------------
 	flag.Parse()
