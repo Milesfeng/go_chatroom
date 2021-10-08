@@ -778,7 +778,7 @@ func main() {
 	e.Static("/chatroom", "templates/chatroom.html")
 	e.Static("/singup", "templates/singup.html")
 	e.Static("/create_chatroom", "templates/create_chatroom.html")
-
+	e.File("/.well-known/pki-validation/B4573A77F51CC95047CF6444F651857F.txt", "ssl/B4573A77F51CC95047CF6444F651857F.txt")
 	//	會員登入
 	e.POST("/login", func(c echo.Context) error {
 		email := strings.TrimSpace(c.FormValue("email"))
