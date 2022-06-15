@@ -6,7 +6,7 @@
 - 使用[Echo](https://echo.labstack.com/)框架
 - 使用Docker架設 MySQL & 部署
 
-##  部署
+##  Usage
 ```
 docker build -t go_chatroom . --no-cache
 docker run -it --name web -p 5000:5000 --net=net -d go_chatroom
